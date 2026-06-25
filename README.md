@@ -111,7 +111,7 @@ shashwath-dw-project/
 ## 📊 Power BI Dashboard
 
 **Published to:** Power BI Service (My Workspace)  
-**Live Dashboard:** [Click here to view](https://app.powerbi.com/links/eXs8qx-Xeq?ctid=51697115-1ecd-42b5-b509-2d62c3919f76&pbi_source=linkShare) 
+**Live Dashboard:** [Click here to view](https://app.powerbi.com/links/eXs8qx-Xeq?ctid=51697115-1ecd-42b5-b509-2d62c3919f76&pbi_source=linkShare)   
 **Pages:** 5  
 **DAX Measures:** 14
 
