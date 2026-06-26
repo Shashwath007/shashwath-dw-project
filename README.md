@@ -8,7 +8,7 @@ An end-to-end data warehouse built during my data engineering internship using t
 
 - **Dataset:** Superstore Sales Dataset (Kaggle) — 9,994 rows, 21 columns
 - **Dataset Link:** [Superstore Sales Dataset](https://www.kaggle.com/datasets/vivek468/superstore-dataset-final)
-- **Tech Stack:** Azure Data Lake Gen2, Azure SQL DB, Databricks, PySpark, Power BI, GitHub
+- **Tech Stack:** Azure Data Lake Gen2, Databricks, PySpark, Power BI, GitHub
 - **Live Dashboard:** [Click here to view](https://app.powerbi.com/links/eXs8qx-Xeq?ctid=51697115-1ecd-42b5-b509-2d62c3919f76&pbi_source=linkShare)
 
 ---
@@ -26,9 +26,9 @@ Databricks Silver Layer  ──── Cleaned, deduped, typed
       |
       v  PySpark
 Databricks Gold Layer  ────── Star schema (Fact + 4 Dims)
-      |                 |
-      v  direct         v  JDBC (blocked — Serverless limitation)
-Power BI Dashboard    Azure SQL DB
+      |
+      v  direct connect
+Power BI Dashboard
 ```
 
 ---
@@ -204,7 +204,6 @@ Total Products = DISTINCTCOUNT(gold_dim_product[product_id])
 ## Setup Steps
 
 **Prerequisites**
-- Azure Free Account
 - Databricks Community Edition
 - Power BI Desktop
 - GitHub account
