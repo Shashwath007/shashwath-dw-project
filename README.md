@@ -41,6 +41,7 @@ shashwath-dw-project/
 ├── 01_bronze.py              # Ingest raw CSV → Bronze Delta table
 ├── 02_silver.py              # Clean, dedupe, fix types → Silver Delta table
 ├── 03_gold.py                # Build Star Schema → Gold Delta tables + SCD Type 1
+├── 05_test_data_validation.py # Injects test data and validates Silver layer logic
 ├── architecture_diagram.png  # Full architecture diagram
 ├── screenshots/              # Power BI dashboard screenshots
 |   ├── page1_executive_summary.png
@@ -218,6 +219,44 @@ Total Products = DISTINCTCOUNT(gold_dim_product[product_id])
 6. Load all 5 Gold tables
 7. Set up relationships between tables in Model view
 8. Create DAX measures and build report pages
+
+---
+
+## Data Validation
+
+To confirm the Silver layer cleaning logic works as expected, a separate test notebook (`05_test_data_validation.py`) was built to inject 5 synthetic rows covering common data quality issues, run them through the Silver layer, and check the results.
+
+| Test Case | Issue Injected | Result |
+|---|---|---|
+| Null customer_id | Missing required key field | Row dropped |
+| Duplicate order_id + product_id | Exact duplicate of an existing row | Duplicate removed |
+| Bad date format | Date in `dd-mm-yyyy` instead of `yyyy-mm-dd` | Row dropped |
+| Negative sales value | Sales value of -50.00 | Row dropped |
+| Null order_id | Missing required key field | Row dropped |
+
+**Initial run:** 3 out of 5 checks passed. Two gaps were found — malformed dates and negative sales values were silently passing through Silver instead of being caught.
+
+**Fix applied:** Added two additional validation rules to `02_silver.py`:
+```python
+df_silver = df_silver.dropna(subset=["order_date"])
+df_silver = df_silver.filter(col("sales") >= 0)
+```
+
+**Re-run result:** 5 out of 5 checks passed. The real `silver_superstore` table output remained unchanged at 9,986 rows since the original Kaggle dataset never contained these issues — the new rules simply harden the pipeline against future bad data.
+
+```
+============================================================
+FINAL VALIDATION CHECK — Silver Layer Data Quality
+============================================================
+✅ PASS  —  Null customer_id
+✅ PASS  —  Duplicate order_id + product_id
+✅ PASS  —  Bad date format
+✅ PASS  —  Negative sales value
+✅ PASS  —  Null order_id
+============================================================
+RESULT: 5/5 tests passed
+============================================================
+```
 
 ---
 
