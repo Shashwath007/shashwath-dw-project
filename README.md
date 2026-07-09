@@ -4,11 +4,11 @@
 
 ## Project Overview
 
-An end-to-end data warehouse built during my data engineering internship using the **Medallion Architecture** (Bronze → Silver → Gold) on **Azure** and **Databricks**, with a **Power BI dashboard** for business insights.
+An end-to-end data warehouse built during my data engineering internship using the **Medallion Architecture** (Bronze → Silver → Gold) on **Databricks**, with a **Power BI dashboard** for business insights — extended with a **real-time streaming pipeline** for live sales monitoring.
 
 - **Dataset:** Superstore Sales Dataset (Kaggle) — 9,994 rows, 21 columns
 - **Dataset Link:** [Superstore Sales Dataset](https://www.kaggle.com/datasets/vivek468/superstore-dataset-final)
-- **Tech Stack:** Azure Data Lake Gen2, Databricks, PySpark, Power BI, GitHub
+- **Tech Stack:** Databricks, PySpark, Delta Lake, Power BI, GitHub
 - **Live Dashboard:** [Click here to view](https://app.powerbi.com/links/eXs8qx-Xeq?ctid=51697115-1ecd-42b5-b509-2d62c3919f76&pbi_source=linkShare)
 
 ---
@@ -18,9 +18,6 @@ An end-to-end data warehouse built during my data engineering internship using t
 ```
 Superstore CSV
       |
-      v  upload
-ADLS Gen2 (Bronze container)
-      |
       v  PySpark
 Databricks Silver Layer  ──── Cleaned, deduped, typed
       |
@@ -28,7 +25,21 @@ Databricks Silver Layer  ──── Cleaned, deduped, typed
 Databricks Gold Layer  ────── Star schema (Fact + 4 Dims)
       |
       v  direct connect
-Power BI Dashboard
+Power BI Dashboard (5 pages — batch)
+
+Python Fake Order Generator (every 5 seconds)
+      |
+      v  Structured Streaming
+streaming_orders_raw (Delta)
+      |
+      v  Silver cleaning logic
+streaming_orders_clean (Delta)
+      |
+      v  Aggregation (every 20 seconds)
+streaming_orders_gold (Delta)
+      |
+      v  DirectQuery
+Power BI Page 6 — Live Sales Monitor
 ```
 
 ---
@@ -38,23 +49,27 @@ Power BI Dashboard
 ```
 shashwath-dw-project/
 |
-├── 01_bronze.py              # Ingest raw CSV → Bronze Delta table
-├── 02_silver.py              # Clean, dedupe, fix types → Silver Delta table
-├── 03_gold.py                # Build Star Schema → Gold Delta tables + SCD Type 1
-├── 05_test_data_validation.py # Injects test data and validates Silver layer logic
-├── architecture_diagram.png  # Full architecture diagram
-├── screenshots/              # Power BI dashboard screenshots
+├── 01_bronze.py                  # Ingest raw CSV → Bronze Delta table
+├── 02_silver.py                  # Clean, dedupe, fix types → Silver Delta table
+├── 03_gold.py                    # Build Star Schema → Gold Delta tables + SCD Type 1
+├── 05_test_data_validation.py    # Injects test data and validates Silver layer logic
+├── 06_stream_generator.py        # Generates fake orders every 5 seconds
+├── 07_stream_silver.py           # Streaming Silver cleaning pipeline
+├── 08_stream_gold.py             # Streaming Gold aggregation (updates every 20s)
+├── architecture_diagram.png      # Full architecture diagram
+├── screenshots/                  # Power BI dashboard screenshots
 |   ├── page1_executive_summary.png
 |   ├── page2_sales_analysis.png
 |   ├── page3_profit_analysis.png
 |   ├── page4_customer_analysis.png
-|   └── page5_product_analysis.png
+|   ├── page5_product_analysis.png
+|   └── page6_live_sales_monitor.png
 └── README.md
 ```
 
 ---
 
-## Notebooks
+## Batch Pipeline Notebooks
 
 ### Notebook 1 — Bronze Layer (`01_bronze.py`)
 - Reads raw Superstore CSV uploaded to Databricks
@@ -68,6 +83,7 @@ shashwath-dw-project/
 - Trims whitespace from all string columns
 - Removes duplicates based on `order_id` + `product_id`
 - Drops rows with null values in key fields
+- Drops rows with bad date formats or negative sales
 - **Output:** 9,986 rows (8 duplicates removed)
 
 ### Notebook 3 — Gold Layer (`03_gold.py`)
@@ -102,11 +118,81 @@ shashwath-dw-project/
 
 ---
 
+## Real-Time Streaming Pipeline
+
+An extension of the batch pipeline that simulates live incoming Superstore orders and processes them in near real-time, updating the Power BI dashboard automatically.
+
+### How it works
+
+```
+06_stream_generator  →  streaming_orders_raw (new order every 5s)
+        |
+07_stream_silver     →  streaming_orders_clean (cleaned, validated)
+        |
+08_stream_gold       →  streaming_orders_gold (aggregated every 20s)
+        |
+Power BI Page 6      →  Live Sales Monitor (DirectQuery)
+```
+
+### Notebook 6 — Stream Generator (`06_stream_generator.py`)
+- Generates a fake Superstore order every 5 seconds using Python's `random` library
+- Covers 10 customers, 10 products, 4 regions, 3 categories
+- Writes each order to `streaming_orders_raw` Delta table in append mode
+- Runs as an infinite loop — stop manually when done
+
+### Notebook 7 — Stream Silver (`07_stream_silver.py`)
+- Reads from `streaming_orders_raw` using `availableNow=True` trigger (Serverless compatible)
+- Applies the same Silver cleaning logic as the batch pipeline — null checks, range validation, whitespace trim
+- Adds `processed_at` timestamp and `data_source = "streaming_simulated"` columns
+- Writes to `streaming_orders_clean` Delta table
+- Re-triggers every 15 seconds using a loop
+
+### Notebook 8 — Stream Gold (`08_stream_gold.py`)
+- Reads all clean streaming data every 20 seconds
+- Groups by `category` and `region`
+- Computes: `total_sales`, `total_orders`, `total_profit`, `avg_discount`, `last_updated`
+- Overwrites `streaming_orders_gold` with latest aggregates
+- **Output:** 12 rows (3 categories × 4 regions)
+
+### Key Technical Challenges Solved
+
+| Challenge | Solution |
+|---|---|
+| Hyphen in catalog name `internship-proj1` | Used backtick quoting with `USE CATALOG` |
+| DBFS disabled on Community Edition | Used Unity Catalog Volume at `/Volumes/internship-proj1/default/streaming_checkpoints/` |
+| `processingTime` not supported on Serverless | Used `availableNow=True` trigger in a loop |
+| UTC time shown in Power BI instead of IST | Added DAX measure to convert UTC → IST using `+ TIME(5,30,0)` |
+
+### Streaming DAX Measure
+
+```
+Last Updated IST =
+FORMAT(
+    MAX('streaming_orders_gold'[last_updated]) + TIME(5, 30, 0),
+    "DD-MM-YYYY HH:MM:SS"
+)
+```
+
+### How to Run the Streaming Pipeline
+
+1. Run `06_stream_generator` — Cells 1, 2, 3
+2. Run `07_stream_silver` — Cells 1, 2, 3, 4
+3. Run `08_stream_gold` — Cells 1, 2, 3, 4
+4. Refresh Power BI → Page 6 updates live
+
+### How to Stop
+
+1. Stop Cell 4 in `08_stream_gold`
+2. Stop Cell 4 in `07_stream_silver`
+3. Stop Cell 3 in `06_stream_generator`
+
+---
+
 ## Power BI Dashboard
 
 **Live Dashboard:** [Click here to view](https://app.powerbi.com/links/eXs8qx-Xeq?ctid=51697115-1ecd-42b5-b509-2d62c3919f76&pbi_source=linkShare)
 
-The dashboard has 5 pages with 14 DAX measures covering sales, profit, customer and product analysis.
+The dashboard has 6 pages — 5 batch analysis pages and 1 live streaming page.
 
 ---
 
@@ -150,6 +236,14 @@ This page covers product performance. Four KPI cards show 2K Total Products, $2.
 
 ---
 
+### Page 6 — Live Sales Monitor
+
+![Live Sales Monitor](screenshots/page6_live_sales_monitor.png)
+
+This page shows real-time streaming data updated every 20 seconds from the streaming pipeline. Three KPI cards show live Total Sales, Total Orders, and Total Profit from the streaming_orders_gold table. A clustered bar chart shows Sales by Category updated in real time. A clustered column chart shows Sales by Region broken down by category. A Last Updated card shows the exact timestamp of the last pipeline refresh in IST. Connected via DirectQuery to streaming_orders_gold in Databricks.
+
+---
+
 ## Orchestration
 
 **Databricks Workflow:** `superstore-daily-pipeline`
@@ -183,6 +277,7 @@ Total Customers = DISTINCTCOUNT(gold_fact_orders[customer_key])
 Avg Sales per Customer = DIVIDE([Total Sales], [Total Customers], 0)
 Repeat Customers = COUNTROWS(FILTER(VALUES(gold_fact_orders[customer_key]), CALCULATE(DISTINCTCOUNT(gold_fact_orders[order_id])) > 1))
 Total Products = DISTINCTCOUNT(gold_dim_product[product_id])
+Last Updated IST = FORMAT(MAX('streaming_orders_gold'[last_updated]) + TIME(5,30,0), "DD-MM-YYYY HH:MM:SS")
 ```
 
 ---
@@ -209,7 +304,7 @@ Total Products = DISTINCTCOUNT(gold_dim_product[product_id])
 - Power BI Desktop
 - GitHub account
 
-**Steps to Reproduce**
+**Batch Pipeline**
 
 1. Download Superstore dataset from Kaggle
 2. Upload CSV to Databricks Catalog under `internship-proj1.default`
@@ -219,6 +314,15 @@ Total Products = DISTINCTCOUNT(gold_dim_product[product_id])
 6. Load all 5 Gold tables
 7. Set up relationships between tables in Model view
 8. Create DAX measures and build report pages
+
+**Streaming Pipeline**
+
+1. Create Unity Catalog Volume: `CREATE VOLUME IF NOT EXISTS streaming_checkpoints`
+2. Run `06_stream_generator` — starts generating fake orders every 5 seconds
+3. Run `07_stream_silver` — starts cleaning and writing to streaming_orders_clean
+4. Run `08_stream_gold` — starts aggregating and writing to streaming_orders_gold
+5. In Power BI, add Page 6 connected to streaming_orders_gold via DirectQuery
+6. Refresh Power BI to see live updates
 
 ---
 
@@ -242,7 +346,7 @@ df_silver = df_silver.dropna(subset=["order_date"])
 df_silver = df_silver.filter(col("sales") >= 0)
 ```
 
-**Re-run result:** 5 out of 5 checks passed. The real `silver_superstore` table output remained unchanged at 9,986 rows since the original Kaggle dataset never contained these issues — the new rules simply harden the pipeline against future bad data.
+**Re-run result:** 5 out of 5 checks passed.
 
 ```
 ============================================================
