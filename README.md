@@ -4,11 +4,11 @@
 
 ## Project Overview
 
-An end-to-end data warehouse built during my data engineering internship using the **Medallion Architecture** (Bronze → Silver → Gold) on **Databricks**, with a **Power BI dashboard** for business insights — extended with a **real-time streaming pipeline** for live sales monitoring.
+An end-to-end data warehouse built during my data engineering internship using the **Medallion Architecture** (Bronze → Silver → Gold) on **Databricks**, with a **Power BI dashboard** for business insights — extended with a **real-time streaming pipeline** for live sales monitoring and a **PySpark ML forecasting model** for predicting future sales, profit and orders.
 
 - **Dataset:** Superstore Sales Dataset (Kaggle) — 9,994 rows, 21 columns
 - **Dataset Link:** [Superstore Sales Dataset](https://www.kaggle.com/datasets/vivek468/superstore-dataset-final)
-- **Tech Stack:** Databricks, PySpark, Delta Lake, Power BI, GitHub
+- **Tech Stack:** Databricks, PySpark, Delta Lake, Spark MLlib, Power BI, GitHub
 - **Live Dashboard:** [Click here to view](https://app.powerbi.com/links/eXs8qx-Xeq?ctid=51697115-1ecd-42b5-b509-2d62c3919f76&pbi_source=linkShare)
 
 ---
@@ -23,9 +23,17 @@ Databricks Silver Layer  ──── Cleaned, deduped, typed
       |
       v  PySpark
 Databricks Gold Layer  ────── Star schema (Fact + 4 Dims)
-      |
-      v  direct connect
-Power BI Dashboard (5 pages — batch)
+      |                 |
+      v  direct         v  Spark MLlib (Linear Regression)
+Power BI Dashboard    09_predictions.py
+(Pages 1-5 batch)           |
+                            v  Delta tables
+                    gold_predictions
+                    gold_predictions_category
+                    gold_predictions_region
+                            |
+                            v  Power BI
+                    Page 7 — Predictive Analytics
 
 Python Fake Order Generator (every 5 seconds)
       |
@@ -56,6 +64,7 @@ shashwath-dw-project/
 ├── 06_stream_generator.py        # Generates fake orders every 5 seconds
 ├── 07_stream_silver.py           # Streaming Silver cleaning pipeline
 ├── 08_stream_gold.py             # Streaming Gold aggregation (updates every 20s)
+├── 09_predictions.py             # ML forecasting — Linear Regression on sales, profit, orders
 ├── architecture_diagram.png      # Full architecture diagram
 ├── screenshots/                  # Power BI dashboard screenshots
 |   ├── page1_executive_summary.png
@@ -63,7 +72,8 @@ shashwath-dw-project/
 |   ├── page3_profit_analysis.png
 |   ├── page4_customer_analysis.png
 |   ├── page5_product_analysis.png
-|   └── page6_live_sales_monitor.png
+|   ├── page6_live_sales_monitor.png
+|   └── page7_predictive_analytics.png
 └── README.md
 ```
 
@@ -192,7 +202,7 @@ FORMAT(
 
 **Live Dashboard:** [Click here to view](https://app.powerbi.com/links/eXs8qx-Xeq?ctid=51697115-1ecd-42b5-b509-2d62c3919f76&pbi_source=linkShare)
 
-The dashboard has 6 pages — 5 batch analysis pages and 1 live streaming page.
+The dashboard has 7 pages — 5 batch analysis pages, 1 live streaming page, and 1 ML predictive analytics page.
 
 ---
 
@@ -241,6 +251,44 @@ This page covers product performance. Four KPI cards show 2K Total Products, $2.
 ![Live Sales Monitor](screenshots/page6_live_sales_monitor.png)
 
 This page shows real-time streaming data updated every 20 seconds from the streaming pipeline. Three KPI cards show live Total Sales, Total Orders, and Total Profit from the streaming_orders_gold table. A clustered bar chart shows Sales by Category updated in real time. A clustered column chart shows Sales by Region broken down by category. A Last Updated card shows the exact timestamp of the last pipeline refresh in IST. Connected via DirectQuery to streaming_orders_gold in Databricks.
+
+---
+
+### Page 7 — Predictive Analytics
+
+![Predictive Analytics](screenshots/page7_predictive_analytics.png)
+
+This page shows ML-based forecasts for August, September, and October 2026 — trained on historical Gold data combined with live streaming data. Three KPI cards show predicted Sales ($3.00M), predicted Profit ($439.56K), and predicted Orders (4K) for August 2026. A line chart shows the overall sales forecast trend across the 3 months growing steadily. A clustered bar chart shows forecasted sales by category with Technology leading at $65K+, followed by Office Supplies and Furniture. A clustered column chart shows forecasted sales by region with West and East leading. A Model Accuracy panel shows R² scores for all models — overall models score 0.649-0.692, category and region models range from 0.027 to 0.298. Models were trained using PySpark MLlib Linear Regression on 49 months of historical data.
+
+---
+
+## ML Predictions Notebook
+
+### Notebook 9 — Predictions (`09_predictions.py`)
+
+Trains Linear Regression models using PySpark MLlib on historical Gold data combined with live streaming data to forecast the next 3 months.
+
+**What it predicts:**
+
+| Prediction | Model | R² Score |
+|---|---|---|
+| Overall Sales | Linear Regression | 0.649 |
+| Overall Profit | Linear Regression | 0.649 |
+| Overall Orders | Linear Regression | 0.692 |
+| Technology Sales | Linear Regression | 0.209 |
+| Furniture Sales | Linear Regression | 0.146 |
+| Office Supplies Sales | Linear Regression | 0.268 |
+| West Sales | Linear Regression | 0.298 |
+| East Sales | Linear Regression | 0.158 |
+| Central Sales | Linear Regression | 0.140 |
+| South Sales | Linear Regression | 0.027 |
+
+**Output tables:**
+- `gold_predictions` — overall sales, profit, orders for Aug–Oct 2026
+- `gold_predictions_category` — sales forecast per category per month
+- `gold_predictions_region` — sales forecast per region per month
+
+**How to run:** Run all 4 cells in order. Re-run anytime to refresh predictions with latest data.
 
 ---
 
@@ -294,6 +342,10 @@ Last Updated IST = FORMAT(MAX('streaming_orders_gold'[last_updated]) + TIME(5,30
 | Best segment by sales? | Consumer — highest sales and profit |
 | Sales trend? | Growing year over year, peak in Nov/Dec |
 | Most used ship mode? | Standard Class — 59.29% of orders |
+| Predicted sales Aug 2026? | $3.00M (ML Linear Regression) |
+| Predicted profit Aug 2026? | $439.56K (ML Linear Regression) |
+| Fastest growing region (forecast)? | West — highest predicted sales |
+| Top category by forecast? | Technology — $65K+ predicted sales |
 
 ---
 
@@ -323,6 +375,14 @@ Last Updated IST = FORMAT(MAX('streaming_orders_gold'[last_updated]) + TIME(5,30
 4. Run `08_stream_gold` — starts aggregating and writing to streaming_orders_gold
 5. In Power BI, add Page 6 connected to streaming_orders_gold via DirectQuery
 6. Refresh Power BI to see live updates
+
+**ML Predictions Pipeline**
+
+1. Make sure batch pipeline has run first (Gold tables must exist)
+2. Run `09_predictions.py` — all 4 cells in order
+3. In Power BI, load 3 new tables: `gold_predictions`, `gold_predictions_category`, `gold_predictions_region`
+4. Build Page 7 — Predictive Analytics using the 3 prediction tables
+5. Re-run `09_predictions.py` anytime to refresh forecasts with latest data
 
 ---
 
